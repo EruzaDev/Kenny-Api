@@ -40,7 +40,7 @@ class DispatchTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.db = Path(self.temp.name)/'queue.sqlite'
-        self.env = json.loads((ROOT/'examples/environment.json').read_text())
+        self.env = json.loads((ROOT/'tests/fixtures/environment.json').read_text())
         self.queue = Queue(self.db, self.env)
         self.body = {'marker_id': 12, 'dictionary': self.env['dictionary'], 'request_id': 'scan-1'}
 
@@ -51,6 +51,15 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(Queue(self.db, self.env).submit(self.body)['id'], job['id'])
         with self.assertRaises(DispatchError):
             self.queue.submit({**self.body, 'caller': 'someone else'})
+
+    def test_deployed_environment_loads_and_resolves_markers(self):
+        env = json.loads((ROOT/'examples/environment.json').read_text())
+        queue = Queue(Path(self.temp.name)/'deployed.sqlite', env)
+        for marker in env['markers']:
+            job = queue.submit({'marker_id': marker['id'], 'dictionary': env['dictionary'],
+                                'request_id': f"deployed-{marker['id']}"})
+            self.assertEqual(job['marker_id'], marker['id'])
+            self.assertIn(job['status'], ('queued', 'awaiting_destination'))
 
     def test_concurrent_claim_and_fifo(self):
         first = self.queue.submit(self.body)

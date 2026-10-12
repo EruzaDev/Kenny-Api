@@ -21,8 +21,8 @@ The model and robot controller run on the Pi, rather than on the web server.
 cd kenny-api
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-# The included examples/environment.json is a test map.
-# Replace it with your actual editor export before using the robot.
+# The included examples/environment.json is the deployed editor export.
+# Load the same export on the robot and in the editor.
 .venv/bin/python -m app
 ```
 
@@ -30,6 +30,9 @@ Open `http://localhost:8000/docs` for interactive endpoint documentation.
 No tokens or login setup are required. The default map is
 `examples/environment.json`; the queue is stored in `data/dispatch.sqlite3`.
 To use another map, set `KENNY_DISPATCH_ENVIRONMENT` to its path.
+The deployed export was copied from `/home/siege/environment.json` and contains
+30 markers on a 240 × 160 grid using `DICT_4X4_50`. The original test map lives
+in `tests/fixtures/environment.json`.
 
 ## Push to Git and deploy
 
