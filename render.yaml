@@ -10,6 +10,8 @@ services:
         value: /app/examples/environment.json
       - key: KENNY_DISPATCH_DB
         value: /app/data/dispatch.sqlite3
+      - key: KENNY_CORS_ORIGINS
+        value: https://localhost,http://localhost,http://localhost:5173,http://127.0.0.1:5173
     disk:
       name: queue-data
       mountPath: /app/data

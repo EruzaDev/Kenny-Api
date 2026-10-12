@@ -1,0 +1,5 @@
+# Install into the simulator venv (with --system-site-packages for ROS).
+numpy>=1.26,<2
+stable-baselines3==2.4.1
+pyserial>=3.5
+opencv-contrib-python>=4.8,<5

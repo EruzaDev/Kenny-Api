@@ -38,6 +38,11 @@ def save(path, value):
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def command_controller(command, job, timeout):
@@ -134,7 +139,8 @@ def consume(api, worker, state_path, controller, timeout, once=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--api', required=True, help='http://API_HOST:8000')
+    parser.add_argument('--api', default=os.environ.get('KENNY_API_URL', 'https://kenny-api.onrender.com'),
+                        help='API base URL (default: KENNY_API_URL or https://kenny-api.onrender.com)')
     parser.add_argument('--worker', default='kenny-pi')
     parser.add_argument('--mode', choices=['nav2', 'model'], required=True)
     parser.add_argument('--timeout', type=float, default=600)

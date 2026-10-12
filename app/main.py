@@ -25,7 +25,10 @@ CALL_SCHEMA = json_schema({'request_id': {'type': 'string', 'example': 'scan-uni
                            'dictionary': {'type': 'string', 'example': 'DICT_4X4_50'},
                            'caller': {'type': 'string', 'example': 'android-scanner'}},
                           ['request_id', 'marker_id', 'dictionary'])
-CLAIM_SCHEMA = json_schema({'worker': {'type': 'string', 'example': 'kenny-pi'}}, ['worker'])
+CLAIM_SCHEMA = json_schema({'worker': {'type': 'string', 'example': 'kenny-pi'},
+                            'job_id': {'type': 'string', 'description': 'Optional selected queued job'}}, ['worker'])
+SWITCH_SCHEMA = json_schema({'worker': {'type': 'string'}, 'current_job_id': {'type': 'string'},
+                             'next_job_id': {'type': 'string'}}, ['worker', 'current_job_id', 'next_job_id'])
 RESULT_SCHEMA = json_schema({'worker': {'type': 'string', 'example': 'kenny-pi'},
                              'status': {'type': 'string', 'enum': ['succeeded', 'failed']},
                              'detail': {'type': 'string'}}, ['worker', 'status'])
@@ -61,12 +64,12 @@ def create_app(environment=None, db_path=None, scanner_token=None, pi_token=None
         if not any(hmac.compare_digest(supplied, f'Bearer {token}'.encode()) for token in tokens):
             raise HTTPException(401, 'Invalid API token', headers={'WWW-Authenticate': 'Bearer'})
 
-    async def body(request):
+    async def body(request, limit=16384):
         content = bytearray()
         async for chunk in request.stream():
             content.extend(chunk)
-            if len(content) > 16384:
-                raise HTTPException(413, 'Request body must be at most 16 KB')
+            if len(content) > limit:
+                raise HTTPException(413, f'Request body must be at most {limit} bytes')
         try:
             value = json.loads(content)
         except (ValueError, UnicodeDecodeError):
@@ -102,6 +105,34 @@ def create_app(environment=None, db_path=None, scanner_token=None, pi_token=None
         payload = await body(request)
         return await asyncio.to_thread(app.state.queue.submit, payload)
 
+    @app.get('/api/map')
+    async def fetch_map(request: Request):
+        authorize(request)
+        return await asyncio.to_thread(app.state.queue.map)
+
+    @app.post('/api/map', openapi_extra=json_schema({
+        'environment': {'type': 'object', 'description': 'Exported version 1 environment.json'},
+        'expected_sha256': {'type': 'string', 'description': 'Optional hash of the map being replaced'}}, ['environment']))
+    async def upload_map(request: Request):
+        authorize(request, pi_only=True)
+        payload = await body(request, limit=32_000_000)
+        return await asyncio.to_thread(app.state.queue.upload_map, payload)
+
+    @app.get('/api/robot')
+    async def robot_position(request: Request):
+        authorize(request)
+        return await asyncio.to_thread(app.state.queue.robot)
+
+    @app.post('/api/pi/pose', openapi_extra=json_schema({
+        'worker': {'type': 'string'}, 'pose': {'type': 'object', 'description': 'map-frame {frame_id,x,y,yaw}'},
+        'source': {'type': 'string', 'enum': ['physical', 'simulation']},
+        'observed_at': {'type': 'number', 'description': 'Unix seconds of pose acquisition'},
+        'goal': {'type': 'object'}, 'route': {'type': 'array'}}, ['worker', 'pose']))
+    async def publish_robot_position(request: Request):
+        authorize(request, pi_only=True)
+        payload = await body(request)
+        return await asyncio.to_thread(app.state.queue.publish_pose, payload)
+
     @app.get('/api/calls')
     async def calls(request: Request):
         authorize(request)
@@ -117,6 +148,17 @@ def create_app(environment=None, db_path=None, scanner_token=None, pi_token=None
         authorize(request, pi_only=True)
         payload = await body(request)
         return await asyncio.to_thread(app.state.queue.claim, payload)
+
+    @app.get('/api/pi/queue')
+    async def pending(request: Request):
+        authorize(request, pi_only=True)
+        return {'jobs': await asyncio.to_thread(app.state.queue.pending)}
+
+    @app.post('/api/pi/switch', openapi_extra=SWITCH_SCHEMA)
+    async def switch(request: Request):
+        authorize(request, pi_only=True)
+        payload = await body(request)
+        return await asyncio.to_thread(app.state.queue.switch, payload)
 
     @app.post('/api/calls/{job_id}/result', openapi_extra=RESULT_SCHEMA)
     async def result(job_id: str, request: Request):
