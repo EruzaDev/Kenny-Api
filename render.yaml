@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: kenny-api
+    runtime: docker
+    plan: 0.5c-512mb
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: KENNY_DISPATCH_ENVIRONMENT
+        value: /app/examples/environment.json
+      - key: KENNY_DISPATCH_DB
+        value: /app/data/dispatch.sqlite3
+    disk:
+      name: queue-data
+      mountPath: /app/data
+      sizeGB: 1
