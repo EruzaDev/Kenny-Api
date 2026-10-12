@@ -49,7 +49,8 @@ def create_app(environment=None, db_path=None, scanner_token=None, pi_token=None
         yield
 
     app = FastAPI(title='Kenny Dispatch API', version='1.0.0', lifespan=lifespan)
-    origins = [origin.strip() for origin in os.environ.get('KENNY_CORS_ORIGINS', '').split(',') if origin.strip()]
+    default_origins = 'https://localhost,http://localhost,http://localhost:5173,http://127.0.0.1:5173'
+    origins = [origin.strip() for origin in os.environ.get('KENNY_CORS_ORIGINS', default_origins).split(',') if origin.strip()]
     if origins:
         app.add_middleware(CORSMiddleware, allow_origins=origins,
                            allow_methods=['GET', 'POST'], allow_headers=['Authorization', 'Content-Type'])

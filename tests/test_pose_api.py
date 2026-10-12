@@ -81,6 +81,16 @@ class PoseTests(unittest.TestCase):
         self.assertEqual(api.get.call_count, 1)
         self.assertEqual(api.post.call_args.args[1]['map_sha256'], 'map-hash')
 
+    def test_native_mobile_origin_is_allowed_without_blueprint_env_sync(self):
+        with patch.dict('os.environ', {}, clear=True):
+            app = create_app(self.environment, self.db)
+        async def check():
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+                    response = await client.get('/api/robot', headers={'Origin': 'https://localhost'})
+                    self.assertEqual(response.headers['access-control-allow-origin'], 'https://localhost')
+        run_async(check())
+
 
 if __name__ == '__main__':
     unittest.main()
