@@ -61,8 +61,11 @@ class Queue:
         mid = body.get('marker_id')
         if type(mid) is not int:
             raise DispatchError('marker_id must be an integer')
-        if body.get('dictionary') != self.environment['dictionary']:
-            raise DispatchError('Scanner dictionary must match the loaded environment')
+        dictionary = body.get('dictionary')
+        limits = {'DICT_4X4_50': 50, 'DICT_4X4_1000': 1000, 'ARUCO': 1024}
+        limit = limits.get(dictionary) if isinstance(dictionary, str) else None
+        if limit is None or not 0 <= mid < limit:
+            raise DispatchError('Use a supported scanner dictionary and a marker_id within its range')
         fingerprint = json.dumps([mid, body['dictionary'], caller])
         # Check the idempotency key before resolving against a potentially changed map.
         with self.connect() as db:
@@ -72,23 +75,26 @@ class Queue:
                 if existing['fingerprint'] != fingerprint:
                     raise DispatchError('request_id already used for a different call', 409)
                 return self.packet(existing)
-            marker = next((m for m in self.environment.get('markers', []) if m['id'] == mid), None)
-            if marker is None:
-                raise DispatchError('Marker is not registered in the server map')
-            env = {**self.environment, 'destination_marker_id': mid}
-            # Use the mount-specific default, rather than another marker's saved offset.
-            env.pop('destination_offset_m', None)
-            goal = destination_goal(env)
-            if not arrival_is_free(env, goal):
-                raise DispatchError('Marker arrival point must be inside a free map cell')
+            marker = None
+            if dictionary == self.environment['dictionary']:
+                marker = next((m for m in self.environment['markers'] if m['id'] == mid), None)
+            destination = None
+            if marker is not None:
+                env = {**self.environment, 'destination_marker_id': mid}
+                # Use the mount-specific default, rather than another marker's saved offset.
+                env.pop('destination_offset_m', None)
+                goal = destination_goal(env)
+                if arrival_is_free(env, goal):
+                    destination = {'frame_id': 'map', 'x': goal[0], 'y': goal[1],
+                                   'yaw': marker['yaw'] + (math.pi if marker['mount'] == 'wall' else 0)}
+            status = 'queued' if destination is not None else 'awaiting_destination'
             packet = {'marker_id': mid, 'dictionary': body['dictionary'], 'caller': caller,
-                      'destination': {'frame_id': 'map', 'x': goal[0], 'y': goal[1],
-                                      'yaw': marker['yaw'] + (math.pi if marker['mount'] == 'wall' else 0)},
+                      'destination': destination,
                       'environment_sha256': hashlib.sha256(json.dumps(self.environment, sort_keys=True).encode()).hexdigest()}
             now = time.time()
             job_id = str(uuid.uuid4())
             db.execute('INSERT INTO jobs (id,request_id,fingerprint,payload,status,created,updated) VALUES (?,?,?,?,?,?,?)',
-                       (job_id, request_id, fingerprint, json.dumps(packet), 'queued', now, now))
+                       (job_id, request_id, fingerprint, json.dumps(packet), status, now, now))
             return self.packet(db.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone())
 
     def list(self):

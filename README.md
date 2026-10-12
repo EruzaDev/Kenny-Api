@@ -182,8 +182,14 @@ The returned job includes `id`, `status`, and:
 
 Calls use saved map coordinates, not coordinates supplied by the phone.
 Wall markers use an arrival point 0.5 m in front of their facing direction;
-floor markers use their centers. Unknown markers, mismatched dictionaries,
-and arrival cells that are blocked, unknown, or outside the map are rejected.
+floor markers use their centers. Every valid marker from the scanner's
+`DICT_4X4_50`, `DICT_4X4_1000`, and `ARUCO` dictionaries is accepted and saved.
+Calls without a usable mapped destination return `status: "awaiting_destination"`
+and `destination: null`. This includes unknown IDs, dictionaries different from
+the loaded map, and blocked or out-of-map arrival points. These calls remain
+visible through the API but are not claimed by the robot. After adding a usable
+destination to the map and restarting the API, submit a new scan/request ID to
+queue a trip; existing waiting calls are not automatically promoted.
 
 Retries reuse the original `request_id`; they return the original job instead
 of adding another. Reusing an ID for another call returns 409. Claiming is
