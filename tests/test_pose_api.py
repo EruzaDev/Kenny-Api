@@ -19,7 +19,7 @@ class PoseTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.db = Path(temp.name) / 'queue.sqlite'
-        self.environment = json.loads((ROOT / 'examples/environment.json').read_text())
+        self.environment = json.loads((ROOT / 'tests/fixtures/environment.json').read_text())
         self.queue = Queue(self.db, self.environment)
         self.packet = {'worker': 'robot', 'pose': {'frame_id': 'map', 'x': 1., 'y': 2., 'yaw': .3},
                        'source': 'physical', 'status': 'navigating', 'observed_at': 100.,

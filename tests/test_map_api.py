@@ -19,7 +19,7 @@ class MapTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.db = Path(temp.name) / 'queue.sqlite'
-        self.environment = json.loads((ROOT / 'examples/environment.json').read_text())
+        self.environment = json.loads((ROOT / 'tests/fixtures/environment.json').read_text())
         self.queue = Queue(self.db, self.environment)
 
     def changed(self, name='Uploaded room', displacement=.2):

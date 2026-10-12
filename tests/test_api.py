@@ -40,7 +40,7 @@ class DispatchTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.db = Path(self.temp.name)/'queue.sqlite'
-        self.env = json.loads((ROOT/'examples/environment.json').read_text())
+        self.env = json.loads((ROOT/'tests/fixtures/environment.json').read_text())
         self.queue = Queue(self.db, self.env)
         self.body = {'marker_id': 12, 'dictionary': self.env['dictionary'], 'request_id': 'scan-1'}
 
@@ -51,6 +51,15 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(Queue(self.db, self.env).submit(self.body)['id'], job['id'])
         with self.assertRaises(DispatchError):
             self.queue.submit({**self.body, 'caller': 'someone else'})
+
+    def test_deployed_environment_loads_and_resolves_markers(self):
+        env = json.loads((ROOT/'examples/environment.json').read_text())
+        queue = Queue(Path(self.temp.name)/'deployed.sqlite', env)
+        for marker in env['markers']:
+            job = queue.submit({'marker_id': marker['id'], 'dictionary': env['dictionary'],
+                                'request_id': f"deployed-{marker['id']}"})
+            self.assertEqual(job['marker_id'], marker['id'])
+            self.assertIn(job['status'], ('queued', 'awaiting_destination'))
 
     def test_concurrent_claim_and_fifo(self):
         first = self.queue.submit(self.body)
@@ -68,13 +77,40 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(self.queue.claim({'worker': 'pi'})['job']['id'], second['id'])
 
     def test_validation(self):
-        for change in [{'marker_id': True}, {'marker_id': 999}, {'dictionary': 'bad'}, {'request_id': ''}]:
+        for change in [{'marker_id': True}, {'marker_id': -1}, {'marker_id': 50}, {'dictionary': 'bad'}, {'dictionary': []}, {'request_id': ''}]:
             with self.subTest(change=change), self.assertRaises(DispatchError):
                 self.queue.submit({**self.body, **change})
         blocked = json.loads(json.dumps(self.env))
         blocked['grid']['data'] = [100]*len(blocked['grid']['data'])
-        with self.assertRaisesRegex(DispatchError, 'free map cell'):
-            Queue(Path(self.temp.name)/'blocked.sqlite', blocked).submit(self.body)
+        job = Queue(Path(self.temp.name)/'blocked.sqlite', blocked).submit(self.body)
+        self.assertEqual(job['status'], 'awaiting_destination')
+        self.assertIsNone(job['destination'])
+
+    def test_accept_all_scanner_markers_without_claiming_unresolved_calls(self):
+        for dictionary, mid in [('DICT_4X4_50', 49), ('DICT_4X4_1000', 999), ('ARUCO', 1023), ('DICT_4X4_1000', 12)]:
+            body = {**self.body, 'dictionary': dictionary, 'marker_id': mid,
+                    'request_id': f'{dictionary}-{mid}'}
+            job = self.queue.submit(body)
+            self.assertEqual(job['status'], 'awaiting_destination')
+            self.assertIsNone(job['destination'])
+            self.assertEqual(self.queue.submit(body)['id'], job['id'])
+            self.assertEqual(Queue(self.db, self.env).get(job['id'])['marker_id'], mid)
+        self.assertIsNone(self.queue.claim({'worker': 'pi'})['job'])
+        mapped = self.queue.submit(self.body)
+        self.assertEqual(self.queue.claim({'worker': 'pi'})['job']['id'], mapped['id'])
+
+    def test_api_accepts_unregistered_marker(self):
+        app = create_app(self.env, self.db)
+        async def request():
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://test') as client:
+                    body = {**self.body, 'marker_id': 999, 'dictionary': 'DICT_4X4_1000'}
+                    response = await client.post('/api/calls', json=body)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.json()['status'], 'awaiting_destination')
+                    retry = await client.post('/api/calls', json=body)
+                    self.assertEqual(retry.json()['id'], response.json()['id'])
+        run_async(request())
 
     def test_map_validation_and_rotated_origin(self):
         from app.environment import arrival_is_free, validate_environment

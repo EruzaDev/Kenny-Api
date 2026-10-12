@@ -11,7 +11,7 @@ from test_api import run_async
 
 class PreemptionAPITests(unittest.TestCase):
     def test_pi_queue_selected_claim_switch_retry_and_role_tokens(self):
-        environment = json.loads((Path(__file__).resolve().parents[1] / 'examples/environment.json').read_text())
+        environment = json.loads((Path(__file__).resolve().parents[1] / 'tests/fixtures/environment.json').read_text())
         with tempfile.TemporaryDirectory() as directory:
             app = create_app(environment, Path(directory) / 'queue.sqlite', scanner_token='scanner', pi_token='robot')
 

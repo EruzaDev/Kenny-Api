@@ -21,8 +21,8 @@ The model and robot controller run on the Pi, rather than on the web server.
 cd kenny-api
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-# The included examples/environment.json is a test map.
-# Replace it with your actual editor export before using the robot.
+# The included examples/environment.json is the deployed editor export.
+# Load the same export on the robot and in the editor.
 .venv/bin/python -m app
 ```
 
@@ -30,6 +30,9 @@ Open `http://localhost:8000/docs` for interactive endpoint documentation.
 No tokens or login setup are required. The default map is
 `examples/environment.json`; the queue is stored in `data/dispatch.sqlite3`.
 To use another map, set `KENNY_DISPATCH_ENVIRONMENT` to its path.
+The deployed export was copied from `/home/siege/environment.json` and contains
+30 markers on a 240 × 160 grid using `DICT_4X4_50`. The original test map lives
+in `tests/fixtures/environment.json`.
 
 ## Push to Git and deploy
 
@@ -247,8 +250,14 @@ The returned job includes `id`, `status`, and:
 
 Calls use saved map coordinates, not coordinates supplied by the phone.
 Wall markers use an arrival point 0.5 m in front of their facing direction;
-floor markers use their centers. Unknown markers, mismatched dictionaries,
-and arrival cells that are blocked, unknown, or outside the map are rejected.
+floor markers use their centers. Every valid marker from the scanner's
+`DICT_4X4_50`, `DICT_4X4_1000`, and `ARUCO` dictionaries is accepted and saved.
+Calls without a usable mapped destination return `status: "awaiting_destination"`
+and `destination: null`. This includes unknown IDs, dictionaries different from
+the loaded map, and blocked or out-of-map arrival points. These calls remain
+visible through the API but are not claimed by the robot. After adding a usable
+destination to the active map using the editor's Render upload tool, submit a new scan/request ID to
+queue a trip; existing waiting calls are not automatically promoted.
 
 Retries reuse the original `request_id`; they return the original job instead
 of adding another. Reusing an ID for another call returns 409. Claiming is

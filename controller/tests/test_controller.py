@@ -257,7 +257,7 @@ class CheckpointTests(unittest.TestCase):
         simulator = ROOT.parent / 'Kenny---Automotive-self-driving-trash-can'
         checkpoint = simulator / 'releases/dynamic-v3-seed2/model/best.zip'
         robot, config, _ = load_config(checkpoint.parent / 'config.json')
-        fixture = json.loads((ROOT / 'examples/environment.json').read_text())
+        fixture = json.loads((ROOT / 'tests/fixtures/environment.json').read_text())
         env = KennyEnv(robot, config, environment=fixture)
         self.addCleanup(env.close)
         env.reset(seed=42)
