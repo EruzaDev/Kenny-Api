@@ -153,6 +153,35 @@ export as an estimated prior, replaces observed geometry using SLAM, loads PPO
 once, and accepts destinations while its sensor/pose loop keeps running. This
 requires deploying the updated queue/selected-claim/switch endpoints below.
 
+### Kenny is not moving: motor connection check
+
+On the Pi, the motor bridge waits for the ESP32 at
+`/dev/serial/by-path/platform-xhci-hcd.1-usb-0:2:1.0-port0`. The LiDAR uses a
+different USB path (`platform-xhci-hcd.0-usb-0:2:1.0-port0`). An active
+`kenny-motors.service` can still be **waiting for USB** rather than running the
+motor bridge. Check without issuing any movement commands:
+
+```sh
+systemctl --user status kenny-motors.service kenny-navigation.service
+journalctl --user -u kenny-motors.service -b --no-pager -n 40
+ls -l /dev/serial/by-path/
+curl -fsS http://127.0.0.1:8002/api/status
+```
+
+If the motor journal says `Waiting for USB serial device and permissions` and
+the `.1` path is absent, the ESP32 is not available to the motor bridge. Check
+its power, USB cable, and assigned Pi USB socket; the LiDAR's serial port is
+not a substitute. The launcher will proceed when the correct readable/writable
+device appears. Confirm the dashboard reports a connected motor bridge and
+fresh motor/encoder telemetry before considering movement.
+
+Also check the dashboard's selected mode and STOP state: **Simulation** leaves
+`kenny-navigation.service` inactive, and a latched STOP inhibits drive. Once
+the hardware is connected, use the dashboard's Robot mode and navigation
+readiness indicators to identify any remaining blockers. Reset STOP only after
+verifying the physical setup and surroundings. The full Pi operating guide is
+in [`controller/README.md`](controller/README.md).
+
 For simulation testing, use the sibling `kenny-map-creator` editor's
 **API receiver · Simulation** panel. Start its backend, open the matching map,
 select a checkpoint; the receiver starts waiting automatically. It polls this deployed
