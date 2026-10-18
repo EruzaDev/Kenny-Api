@@ -237,6 +237,24 @@ class Queue:
             return [self.packet(r) for r in db.execute(
                 "SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY sequence")]
 
+    def cancel(self, body):
+        """Atomically remove a queued call; never cancel a claimed robot trip."""
+        if not isinstance(body, dict):
+            raise DispatchError('Expected a JSON object')
+        job_id = label(body.get('job_id'), 'job_id')
+        with self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone()
+            if row is None:
+                raise DispatchError('Job not found', 404)
+            if row['status'] == 'cancelled':
+                return self.packet(row)
+            if row['status'] != 'queued':
+                raise DispatchError('Only queued calls can be cancelled; a running trip must stop and resolve first', 409)
+            db.execute("UPDATE jobs SET status='cancelled',worker=NULL,detail=?,updated=? WHERE id=?",
+                       ('Cancelled from operations queue', time.time(), job_id))
+            return self.packet(db.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone())
+
     def claim(self, body):
         worker = label(body.get('worker'), 'worker')
         with self.connect() as db:

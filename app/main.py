@@ -29,6 +29,7 @@ CLAIM_SCHEMA = json_schema({'worker': {'type': 'string', 'example': 'kenny-pi'},
                             'job_id': {'type': 'string', 'description': 'Optional selected queued job'}}, ['worker'])
 SWITCH_SCHEMA = json_schema({'worker': {'type': 'string'}, 'current_job_id': {'type': 'string'},
                              'next_job_id': {'type': 'string'}}, ['worker', 'current_job_id', 'next_job_id'])
+CANCEL_SCHEMA = json_schema({'job_id': {'type': 'string', 'description': 'ID of an unclaimed queued call'}}, ['job_id'])
 RESULT_SCHEMA = json_schema({'worker': {'type': 'string', 'example': 'kenny-pi'},
                              'status': {'type': 'string', 'enum': ['succeeded', 'failed']},
                              'detail': {'type': 'string'}}, ['worker', 'status'])
@@ -154,6 +155,12 @@ def create_app(environment=None, db_path=None, scanner_token=None, pi_token=None
     async def pending(request: Request):
         authorize(request, pi_only=True)
         return {'jobs': await asyncio.to_thread(app.state.queue.pending)}
+
+    @app.post('/api/pi/cancel', openapi_extra=CANCEL_SCHEMA)
+    async def cancel(request: Request):
+        authorize(request, pi_only=True)
+        payload = await body(request)
+        return await asyncio.to_thread(app.state.queue.cancel, payload)
 
     @app.post('/api/pi/switch', openapi_extra=SWITCH_SCHEMA)
     async def switch(request: Request):

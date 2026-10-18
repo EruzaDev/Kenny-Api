@@ -76,6 +76,31 @@ class DispatchTests(unittest.TestCase):
         self.queue.finish(first['id'], done)
         self.assertEqual(self.queue.claim({'worker': 'pi'})['job']['id'], second['id'])
 
+    def test_cancel_queued_call_is_idempotent_and_cannot_cancel_running_trip(self):
+        first = self.queue.submit(self.body)
+        second = self.queue.submit({**self.body, 'request_id': 'scan-2'})
+        cancelled = self.queue.cancel({'job_id': first['id']})
+        self.assertEqual(cancelled['status'], 'cancelled')
+        self.assertEqual(self.queue.cancel({'job_id': first['id']})['status'], 'cancelled')
+        self.assertEqual([job['id'] for job in self.queue.pending()], [second['id']])
+        self.assertEqual(self.queue.claim({'worker': 'pi'})['job']['id'], second['id'])
+        with self.assertRaisesRegex(DispatchError, 'Only queued'):
+            self.queue.cancel({'job_id': second['id']})
+
+    def test_cancel_claim_race_has_one_atomic_winner(self):
+        job = self.queue.submit(self.body)
+        def cancel():
+            try:
+                return self.queue.cancel({'job_id': job['id']})['status']
+            except DispatchError as error:
+                return error.status
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claim = pool.submit(self.queue.claim, {'worker': 'pi'})
+            cancellation = pool.submit(cancel)
+            claimed, result = claim.result()['job'], cancellation.result()
+        self.assertEqual((claimed is not None, result), (True, 409) if claimed else (False, 'cancelled'))
+        self.assertEqual(self.queue.get(job['id'])['status'], 'running' if claimed else 'cancelled')
+
     def test_validation(self):
         for change in [{'marker_id': True}, {'marker_id': -1}, {'marker_id': 50}, {'dictionary': 'bad'}, {'dictionary': []}, {'request_id': ''}]:
             with self.subTest(change=change), self.assertRaises(DispatchError):
@@ -197,6 +222,22 @@ class DispatchTests(unittest.TestCase):
                     self.assertEqual((await client.get('/api/calls/missing', headers=pi)).status_code, 404)
                     self.assertEqual((await client.post('/api/calls', content=b'invalid', headers=scanner)).status_code, 422)
                     self.assertEqual((await client.post('/api/calls', content=b'x'*17000, headers=scanner)).status_code, 413)
+        run_async(routes())
+
+    def test_cancel_endpoint_requires_pi_token_and_refuses_claimed_job(self):
+        app = create_app(self.env, self.db, 'scanner-token', 'pi-token')
+        async def routes():
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='https://test') as client:
+                    scanner, pi = {'Authorization': 'Bearer scanner-token'}, {'Authorization': 'Bearer pi-token'}
+                    first = (await client.post('/api/calls', json=self.body, headers=scanner)).json()
+                    second = (await client.post('/api/calls', json={**self.body, 'request_id': 'scan-2'}, headers=scanner)).json()
+                    request = {'job_id': second['id']}
+                    self.assertEqual((await client.post('/api/pi/cancel', json=request, headers=scanner)).status_code, 401)
+                    self.assertEqual((await client.post('/api/pi/cancel', json=request, headers=pi)).json()['status'], 'cancelled')
+                    self.assertEqual([j['id'] for j in (await client.get('/api/pi/queue', headers=pi)).json()['jobs']], [first['id']])
+                    self.assertEqual((await client.post('/api/pi/claim', json={'worker': 'pi'}, headers=pi)).json()['job']['id'], first['id'])
+                    self.assertEqual((await client.post('/api/pi/cancel', json={'job_id': first['id']}, headers=pi)).status_code, 409)
         run_async(routes())
 
     def test_receiver_result_retry_does_not_repeat_motion(self):
