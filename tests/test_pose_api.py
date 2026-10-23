@@ -41,6 +41,24 @@ class PoseTests(unittest.TestCase):
             with self.assertRaisesRegex(DispatchError, 'Tracking map changed'):
                 restarted.publish_pose({**self.packet, 'observed_at': 106., 'map_sha256': result['map_sha256']})
 
+    def test_display_state_sync_does_not_refresh_stale_position(self):
+        with patch('app.queue.time.time', return_value=100.):
+            self.queue.publish_pose(self.packet)
+        with patch('app.queue.time.time', return_value=110.):
+            result = self.queue.set_display_state({'status': 'idle'})
+            self.assertEqual(result['status'], 'idle')
+            self.assertTrue(result['stale'])
+            self.assertEqual(result['observed_at'], 100.)
+            self.assertEqual(result['display_updated_at'], 110.)
+            with self.assertRaises(DispatchError):
+                self.queue.set_display_state({'status': 'stopped'})
+        with patch('app.queue.time.time', return_value=111.):
+            result = Queue(self.db, self.environment).robot()
+            self.assertEqual(result['status'], 'idle')
+            self.assertTrue(result['stale'])
+            self.queue.publish_pose({**self.packet, 'observed_at': 111.})
+            self.assertEqual(self.queue.robot()['status'], 'idle')
+
     def test_old_invalid_and_other_workers_cannot_replace_a_current_pose(self):
         with patch('app.queue.time.time', return_value=100.):
             self.queue.publish_pose(self.packet)
@@ -68,6 +86,21 @@ class PoseTests(unittest.TestCase):
                     public = await client.get('/api/robot', headers=scanner)
                     self.assertEqual(public.json()['source'], 'simulation')
                     self.assertFalse(public.json()['stale'])
+        run_async(check())
+
+    def test_display_status_endpoint_accepts_pi_role_without_pose(self):
+        app = create_app(self.environment, self.db, scanner_token='scanner', pi_token='robot')
+        async def check():
+            async with app.router.lifespan_context(app):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+                    scanner, robot = {'Authorization': 'Bearer scanner'}, {'Authorization': 'Bearer robot'}
+                    self.assertEqual((await client.post('/api/pi/display-state', json={'status':'navigating'}, headers=scanner)).status_code, 401)
+                    response = await client.post('/api/pi/display-state', json={'status':'navigating'}, headers=robot)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(response.json()['status'], 'navigating')
+                    self.assertTrue(response.json()['stale'])
+                    self.assertIsNone(response.json()['pose'])
+                    self.assertEqual((await client.get('/api/robot', headers=scanner)).json()['status'], 'navigating')
         run_async(check())
 
     def test_tracker_pins_the_map_and_does_not_publish_missing_pose(self):

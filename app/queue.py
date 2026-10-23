@@ -48,6 +48,9 @@ class Queue:
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                 worker TEXT NOT NULL, payload TEXT NOT NULL,
                 observed REAL NOT NULL, received REAL NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS robot_display (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                status TEXT NOT NULL, updated REAL NOT NULL)''')
 
     @contextmanager
     def connect(self):
@@ -122,7 +125,23 @@ class Queue:
 
     def robot(self):
         with self.connect() as db:
-            return self.pose_packet(db.execute('SELECT * FROM robot_pose WHERE singleton=1').fetchone(), time.time())
+            return self.robot_packet(db, time.time())
+
+    def robot_packet(self, db, now):
+        packet = self.pose_packet(db.execute('SELECT * FROM robot_pose WHERE singleton=1').fetchone(), now)
+        display = db.execute('SELECT status,updated FROM robot_display WHERE singleton=1').fetchone()
+        if display:
+            packet.update(status=display['status'], display_updated_at=display['updated'])
+        return packet
+
+    def set_display_state(self, body):
+        status = body.get('status') if isinstance(body, dict) else None
+        if status not in ('idle', 'navigating'):
+            raise DispatchError('Display status must be idle or navigating')
+        with self.connect() as db:
+            now = time.time()
+            db.execute('INSERT OR REPLACE INTO robot_display VALUES (1,?,?)', (status, now))
+            return self.robot_packet(db, now)
 
     def publish_pose(self, body):
         worker = label(body.get('worker'), 'worker')
@@ -173,7 +192,7 @@ class Queue:
                       'map_sha256': current_map['sha256'], 'map_revision': current_map['revision']}
             db.execute('INSERT OR REPLACE INTO robot_pose VALUES (1,?,?,?,?)',
                        (worker, json.dumps(packet, allow_nan=False), observed, now))
-            return self.pose_packet(db.execute('SELECT * FROM robot_pose WHERE singleton=1').fetchone(), now)
+            return self.robot_packet(db, now)
 
     def submit(self, body):
         if not isinstance(body, dict):

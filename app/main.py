@@ -125,6 +125,13 @@ def create_app(environment=None, db_path=None, scanner_token=None, pi_token=None
         authorize(request)
         return await asyncio.to_thread(app.state.queue.robot)
 
+    @app.post('/api/pi/display-state', openapi_extra=json_schema({
+        'status': {'type': 'string', 'enum': ['idle', 'navigating']}}, ['status']))
+    async def robot_display_state(request: Request):
+        authorize(request, pi_only=True)
+        payload = await body(request)
+        return await asyncio.to_thread(app.state.queue.set_display_state, payload)
+
     @app.post('/api/pi/pose', openapi_extra=json_schema({
         'worker': {'type': 'string'}, 'pose': {'type': 'object', 'description': 'map-frame {frame_id,x,y,yaw}'},
         'source': {'type': 'string', 'enum': ['physical', 'simulation']},
